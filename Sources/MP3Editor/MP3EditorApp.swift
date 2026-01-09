@@ -63,6 +63,9 @@ struct TagHelper {
         var disc: String?
         var bpm: String?
         var compilation: Bool?
+        var artwork_data: String?
+        var artwork_mime: String?
+        var artwork_delete: Bool?
         var error: String?
         var success: Bool?
     }
@@ -127,6 +130,9 @@ struct ContentView: View {
     @State private var disc: String = ""
     @State private var bpm: String = ""
     @State private var isCompilation: Bool = false
+    @State private var artworkData: Data? = nil
+    @State private var artworkMime: String? = nil
+    @State private var artworkDeleted: Bool = false
     @State private var isDragging = false
     @State private var showAlert = false
     @State private var alertMessage = ""
@@ -144,6 +150,7 @@ struct ContentView: View {
     @State private var originalDisc: String = ""
     @State private var originalBpm: String = ""
     @State private var originalIsCompilation: Bool = false
+    @State private var originalArtworkData: Data? = nil
 
     var hasFile: Bool {
         filePath != nil
@@ -152,7 +159,8 @@ struct ContentView: View {
     var hasChanges: Bool {
         title != originalTitle || artist != originalArtist || album != originalAlbum ||
         genre != originalGenre || year != originalYear || track != originalTrack ||
-        disc != originalDisc || bpm != originalBpm || isCompilation != originalIsCompilation
+        disc != originalDisc || bpm != originalBpm || isCompilation != originalIsCompilation ||
+        artworkData != originalArtworkData || artworkDeleted
     }
 
     var body: some View {
@@ -177,6 +185,9 @@ struct ContentView: View {
                 disc: $disc,
                 bpm: $bpm,
                 isCompilation: $isCompilation,
+                artworkData: $artworkData,
+                artworkMime: $artworkMime,
+                artworkDeleted: $artworkDeleted,
                 isEnabled: hasFile
             )
 
@@ -207,11 +218,11 @@ struct ContentView: View {
                         showOverwriteWarning = true
                     }
                 }
-                    .disabled(!hasFile)
+                .disabled(!hasFile)
             }
         }
         .padding(25)
-        .frame(width: 520, height: 540)
+        .frame(width: 520, height: 680)
         .contentShape(Rectangle())
         .onTapGesture {
             NSApp.keyWindow?.makeFirstResponder(nil)
@@ -261,6 +272,9 @@ struct ContentView: View {
         disc = ""
         bpm = ""
         isCompilation = false
+        artworkData = nil
+        artworkMime = nil
+        artworkDeleted = false
         originalTitle = ""
         originalArtist = ""
         originalAlbum = ""
@@ -270,6 +284,7 @@ struct ContentView: View {
         originalDisc = ""
         originalBpm = ""
         originalIsCompilation = false
+        originalArtworkData = nil
     }
 
     func handleDrop(providers: [NSItemProvider]) -> Bool {
@@ -288,9 +303,6 @@ struct ContentView: View {
     }
 
     func loadFile(url: URL) {
-        filePath = url.path
-        fileName = url.lastPathComponent
-
         let tagData = TagHelper.readTags(from: url.path)
 
         if let error = tagData.error {
@@ -305,6 +317,9 @@ struct ContentView: View {
             disc = ""
             bpm = ""
             isCompilation = false
+            artworkData = nil
+            artworkMime = nil
+            artworkDeleted = false
         } else {
             title = tagData.title ?? ""
             artist = tagData.artist ?? ""
@@ -315,6 +330,17 @@ struct ContentView: View {
             disc = tagData.disc ?? ""
             bpm = tagData.bpm ?? ""
             isCompilation = tagData.compilation ?? false
+
+            // Load artwork
+            if let base64Data = tagData.artwork_data,
+               let data = Data(base64Encoded: base64Data) {
+                artworkData = data
+                artworkMime = tagData.artwork_mime
+            } else {
+                artworkData = nil
+                artworkMime = nil
+            }
+            artworkDeleted = false
         }
 
         // Store original values for restore
@@ -327,6 +353,10 @@ struct ContentView: View {
         originalDisc = disc
         originalBpm = bpm
         originalIsCompilation = isCompilation
+        originalArtworkData = artworkData
+
+        filePath = url.path
+        fileName = url.lastPathComponent
     }
 
     func restoreOriginal() {
@@ -339,6 +369,9 @@ struct ContentView: View {
         disc = originalDisc
         bpm = originalBpm
         isCompilation = originalIsCompilation
+        artworkData = originalArtworkData
+        artworkMime = originalArtworkData != nil ? artworkMime : nil
+        artworkDeleted = false
     }
 
     func saveFile() {
@@ -369,6 +402,11 @@ struct ContentView: View {
             }
         }
 
+        var artworkBase64: String? = nil
+        if let data = artworkData {
+            artworkBase64 = data.base64EncodedString()
+        }
+
         let tagData = TagHelper.TagData(
             title: title,
             artist: artist,
@@ -378,7 +416,10 @@ struct ContentView: View {
             track: track,
             disc: disc,
             bpm: bpm,
-            compilation: isCompilation
+            compilation: isCompilation,
+            artwork_data: artworkBase64,
+            artwork_mime: artworkMime,
+            artwork_delete: artworkDeleted
         )
 
         let result = TagHelper.writeTags(to: targetPath, data: tagData)
@@ -400,6 +441,8 @@ struct ContentView: View {
             originalDisc = disc
             originalBpm = bpm
             originalIsCompilation = isCompilation
+            originalArtworkData = artworkData
+            artworkDeleted = false
         }
     }
 }
@@ -463,6 +506,9 @@ struct FieldsCard: View {
     @Binding var disc: String
     @Binding var bpm: String
     @Binding var isCompilation: Bool
+    @Binding var artworkData: Data?
+    @Binding var artworkMime: String?
+    @Binding var artworkDeleted: Bool
     var isEnabled: Bool
 
     private let labelWidth: CGFloat = 55
@@ -470,6 +516,13 @@ struct FieldsCard: View {
     var body: some View {
         GlassCard {
             VStack(spacing: 12) {
+                ArtworkView(
+                    artworkData: $artworkData,
+                    artworkMime: $artworkMime,
+                    artworkDeleted: $artworkDeleted,
+                    isEnabled: isEnabled
+                )
+
                 FieldRow(label: "Title", text: $title, placeholder: "Song title", labelWidth: labelWidth, isEnabled: isEnabled)
                 FieldRow(label: "Artist", text: $artist, placeholder: "Artist name", labelWidth: labelWidth, isEnabled: isEnabled)
                 FieldRow(label: "Album", text: $album, placeholder: "Album name", labelWidth: labelWidth, isEnabled: isEnabled)
@@ -532,5 +585,143 @@ struct GlassCard<Content: View>: View {
             .frame(maxWidth: .infinity)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22))
             .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+    }
+}
+
+struct ArtworkView: View {
+    @Binding var artworkData: Data?
+    @Binding var artworkMime: String?
+    @Binding var artworkDeleted: Bool
+    var isEnabled: Bool
+    @State private var isDragging = false
+    @State private var isHovering = false
+
+    private let size: CGFloat = 120
+
+    private var isHighlighted: Bool {
+        isEnabled && (isDragging || (isHovering && artworkData == nil))
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                if let data = artworkData, let nsImage = NSImage(data: data) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: size, height: size)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(isDragging ? Color.accentColor : Color.clear, lineWidth: 2)
+                        )
+                } else {
+                    VStack(spacing: 6) {
+                        Image(systemName: "photo")
+                            .font(.system(size: 28, weight: .light))
+                        if isEnabled {
+                            Text("Drop album art here or click to browse")
+                                .font(.system(size: 11))
+                                .multilineTextAlignment(.center)
+                        } else {
+                            Text("Album art")
+                                .font(.system(size: 12))
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .foregroundColor(isHighlighted ? .accentColor : .secondary)
+                    .frame(width: size, height: size)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
+                            .foregroundColor(isHighlighted ? .accentColor : .secondary.opacity(0.5))
+                    )
+                    .background(isHighlighted ? Color.accentColor.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard isEnabled && artworkData == nil else { return }
+                selectImage()
+            }
+            .onHover { hovering in
+                isHovering = hovering
+            }
+            .onDrop(of: [.image, .fileURL], isTargeted: $isDragging) { providers in
+                guard isEnabled else { return false }
+                return handleImageDrop(providers: providers)
+            }
+
+            if artworkData != nil && isEnabled {
+                Button(action: {
+                    artworkData = nil
+                    artworkMime = nil
+                    artworkDeleted = true
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.white)
+                        .background(Circle().fill(Color.black.opacity(0.5)))
+                }
+                .buttonStyle(.plain)
+                .offset(x: 4, y: -4)
+            }
+        }
+    }
+
+    private func selectImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType.image]
+        panel.allowsMultipleSelection = false
+
+        if panel.runModal() == .OK, let url = panel.url {
+            if let imageData = try? Data(contentsOf: url) {
+                let ext = url.pathExtension.lowercased()
+                let mime = ext == "png" ? "image/png" : (ext == "gif" ? "image/gif" : "image/jpeg")
+                artworkData = imageData
+                artworkMime = mime
+                artworkDeleted = false
+            }
+        }
+    }
+
+    private func handleImageDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+
+        // Try loading as image data first
+        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
+                if let data = data {
+                    DispatchQueue.main.async {
+                        self.artworkData = data
+                        self.artworkMime = "image/png"
+                        self.artworkDeleted = false
+                    }
+                }
+            }
+            return true
+        }
+
+        // Try loading as file URL
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+
+                let ext = url.pathExtension.lowercased()
+                guard ["jpg", "jpeg", "png", "gif", "webp"].contains(ext) else { return }
+
+                if let imageData = try? Data(contentsOf: url) {
+                    DispatchQueue.main.async {
+                        let mime = ext == "png" ? "image/png" : (ext == "gif" ? "image/gif" : "image/jpeg")
+                        self.artworkData = imageData
+                        self.artworkMime = mime
+                        self.artworkDeleted = false
+                    }
+                }
+            }
+            return true
+        }
+
+        return false
     }
 }

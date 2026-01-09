@@ -6,11 +6,12 @@ Used by MP3Editor Swift app for reliable ID3 tag handling.
 
 import sys
 import json
+import base64
 from pathlib import Path
 
 try:
     from mutagen.mp3 import MP3
-    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TYER, TRCK, TPOS, TBPM, TCMP
+    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TYER, TRCK, TPOS, TBPM, TCMP, APIC
 except ImportError:
     print(json.dumps({"error": "mutagen not installed. Run: pip3 install mutagen"}))
     sys.exit(1)
@@ -46,6 +47,16 @@ def read_tags(filepath: str) -> dict:
         tcmp = tags.get("TCMP")
         compilation = bool(tcmp and tcmp.text and str(tcmp.text[0]) == "1")
 
+        # Album art (APIC frame)
+        artwork_data = None
+        artwork_mime = None
+        for key in tags.keys():
+            if key.startswith("APIC"):
+                apic = tags[key]
+                artwork_data = base64.b64encode(apic.data).decode("utf-8")
+                artwork_mime = apic.mime
+                break
+
         return {
             "title": get_text("TIT2"),
             "artist": get_text("TPE1"),
@@ -55,7 +66,9 @@ def read_tags(filepath: str) -> dict:
             "track": track,
             "disc": disc,
             "bpm": get_text("TBPM"),
-            "compilation": compilation
+            "compilation": compilation,
+            "artwork_data": artwork_data,
+            "artwork_mime": artwork_mime
         }
     except Exception as e:
         return {"error": str(e)}
@@ -126,6 +139,27 @@ def write_tags(filepath: str, data: dict) -> dict:
                 tags["TCMP"] = TCMP(encoding=3, text="1")
             elif "TCMP" in tags:
                 del tags["TCMP"]
+
+        # Handle album art
+        if data.get("artwork_delete"):
+            # Remove all APIC frames
+            keys_to_delete = [k for k in tags.keys() if k.startswith("APIC")]
+            for key in keys_to_delete:
+                del tags[key]
+        elif data.get("artwork_data") and data.get("artwork_mime"):
+            # Remove existing APIC frames first
+            keys_to_delete = [k for k in tags.keys() if k.startswith("APIC")]
+            for key in keys_to_delete:
+                del tags[key]
+            # Add new album art
+            image_data = base64.b64decode(data["artwork_data"])
+            tags["APIC"] = APIC(
+                encoding=3,
+                mime=data["artwork_mime"],
+                type=3,  # Cover (front)
+                desc="Cover",
+                data=image_data
+            )
 
         audio.save()
         return {"success": True}
