@@ -1,0 +1,15 @@
+# Build artifacts
+.build/
+MP3Editor.app/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Xcode (if used later)
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
