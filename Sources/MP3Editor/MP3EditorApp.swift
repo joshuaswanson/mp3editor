@@ -130,7 +130,9 @@ struct ContentView: View {
     @State private var isDragging = false
     @State private var showAlert = false
     @State private var alertMessage = ""
-    @State private var saveAsCopy = false
+    @State private var saveAsCopy = true
+    @State private var showOverwriteWarning = false
+    @State private var showUncheckedWarning = false
 
     // Original values for restore
     @State private var originalTitle: String = ""
@@ -180,7 +182,16 @@ struct ContentView: View {
 
             // Bottom bar
             HStack {
-                Toggle("Save as copy", isOn: $saveAsCopy)
+                Toggle("Save as copy", isOn: Binding(
+                    get: { saveAsCopy },
+                    set: { newValue in
+                        if !newValue {
+                            showUncheckedWarning = true
+                        } else {
+                            saveAsCopy = true
+                        }
+                    }
+                ))
                     .toggleStyle(.checkbox)
                     .disabled(!hasFile)
 
@@ -189,7 +200,13 @@ struct ContentView: View {
                 Button("Restore", action: restoreOriginal)
                     .disabled(!hasChanges)
 
-                Button("Save Changes", action: saveFile)
+                Button("Save Changes") {
+                    if saveAsCopy {
+                        saveFile()
+                    } else {
+                        showOverwriteWarning = true
+                    }
+                }
                     .disabled(!hasFile)
             }
         }
@@ -203,6 +220,22 @@ struct ContentView: View {
             Button("OK") { }
         } message: {
             Text(alertMessage)
+        }
+        .alert("Overwrite Original File?", isPresented: $showOverwriteWarning) {
+            Button("Cancel", role: .cancel) { }
+            Button("Overwrite", role: .destructive) {
+                saveFile()
+            }
+        } message: {
+            Text("This will modify the original file. This action cannot be undone.")
+        }
+        .alert("Disable Save as Copy?", isPresented: $showUncheckedWarning) {
+            Button("Cancel", role: .cancel) { }
+            Button("Disable", role: .destructive) {
+                saveAsCopy = false
+            }
+        } message: {
+            Text("With this option disabled, saving will overwrite the original file.")
         }
     }
 
