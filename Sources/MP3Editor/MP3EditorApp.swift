@@ -2,6 +2,16 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
+extension View {
+    @ViewBuilder func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
@@ -173,8 +183,7 @@ struct ContentView: View {
                 fileName: fileName,
                 isDragging: $isDragging,
                 onTap: selectFile,
-                onClear: clearFile,
-                onDrop: handleDrop
+                onClear: clearFile
             )
 
             // Fields
@@ -229,6 +238,11 @@ struct ContentView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             NSApp.keyWindow?.makeFirstResponder(nil)
+        }
+        .if(!hasFile) { view in
+            view.onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
+                handleDrop(providers: providers)
+            }
         }
         .alert("MP3 Editor", isPresented: $showAlert) {
             Button("OK") { }
@@ -455,7 +469,6 @@ struct DropZoneView: View {
     @Binding var isDragging: Bool
     let onTap: () -> Void
     let onClear: () -> Void
-    let onDrop: ([NSItemProvider]) -> Bool
     @State private var isHovering = false
 
     private var isHighlighted: Bool {
@@ -505,7 +518,6 @@ struct DropZoneView: View {
                 .padding(8)
             }
         }
-        .onDrop(of: [.fileURL], isTargeted: $isDragging, perform: onDrop)
     }
 }
 
@@ -606,8 +618,8 @@ struct ArtworkView: View {
     @Binding var artworkMime: String?
     @Binding var artworkDeleted: Bool
     var isEnabled: Bool
-    @State private var isDragging = false
     @State private var isHovering = false
+    @State private var isDragging = false
 
     private let size: CGFloat = 120
 
@@ -624,10 +636,6 @@ struct ArtworkView: View {
                         .aspectRatio(contentMode: .fill)
                         .frame(width: size, height: size)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(isDragging ? Color.accentColor : Color.clear, lineWidth: 2)
-                        )
                 } else {
                     VStack(spacing: 6) {
                         Image(systemName: "photo")
@@ -660,9 +668,10 @@ struct ArtworkView: View {
             .onHover { hovering in
                 isHovering = hovering
             }
-            .onDrop(of: [.image, .fileURL], isTargeted: $isDragging) { providers in
-                guard isEnabled else { return false }
-                return handleImageDrop(providers: providers)
+            .if(isEnabled) { view in
+                view.onDrop(of: [.fileURL], isTargeted: $isDragging) { providers in
+                    handleImageDrop(providers: providers)
+                }
             }
 
             if artworkData != nil && isEnabled {
@@ -700,41 +709,29 @@ struct ArtworkView: View {
     private func handleImageDrop(providers: [NSItemProvider]) -> Bool {
         guard let provider = providers.first else { return false }
 
-        // Try loading as image data first
-        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
-                if let data = data {
-                    DispatchQueue.main.async {
-                        self.artworkData = data
-                        self.artworkMime = "image/png"
-                        self.artworkDeleted = false
-                    }
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+            var url: URL?
+
+            if let directURL = item as? URL {
+                url = directURL
+            } else if let data = item as? Data {
+                url = URL(dataRepresentation: data, relativeTo: nil)
+            }
+
+            guard let fileURL = url else { return }
+
+            let ext = fileURL.pathExtension.lowercased()
+            guard ["jpg", "jpeg", "png", "gif", "webp", "tiff", "bmp"].contains(ext) else { return }
+
+            if let imageData = try? Data(contentsOf: fileURL) {
+                DispatchQueue.main.async {
+                    let mime = ext == "png" ? "image/png" : (ext == "gif" ? "image/gif" : "image/jpeg")
+                    self.artworkData = imageData
+                    self.artworkMime = mime
+                    self.artworkDeleted = false
                 }
             }
-            return true
         }
-
-        // Try loading as file URL
-        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
-                guard let data = item as? Data,
-                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-
-                let ext = url.pathExtension.lowercased()
-                guard ["jpg", "jpeg", "png", "gif", "webp"].contains(ext) else { return }
-
-                if let imageData = try? Data(contentsOf: url) {
-                    DispatchQueue.main.async {
-                        let mime = ext == "png" ? "image/png" : (ext == "gif" ? "image/gif" : "image/jpeg")
-                        self.artworkData = imageData
-                        self.artworkMime = mime
-                        self.artworkDeleted = false
-                    }
-                }
-            }
-            return true
-        }
-
-        return false
+        return true
     }
 }
