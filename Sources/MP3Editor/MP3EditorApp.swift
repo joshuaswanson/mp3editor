@@ -81,9 +81,11 @@ struct TagHelper {
 
         do {
             try process.run()
+
+            // Read data BEFORE waitUntilExit to avoid pipe buffer deadlock
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             return try JSONDecoder().decode(TagData.self, from: data)
         } catch {
             return TagData(error: error.localizedDescription)
@@ -108,9 +110,10 @@ struct TagHelper {
             inputPipe.fileHandleForWriting.write(jsonData)
             inputPipe.fileHandleForWriting.closeFile()
 
+            // Read data BEFORE waitUntilExit to avoid pipe buffer deadlock
+            let resultData = outputPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
 
-            let resultData = outputPipe.fileHandleForReading.readDataToEndOfFile()
             return try JSONDecoder().decode(TagData.self, from: resultData)
         } catch {
             return TagData(error: error.localizedDescription)
