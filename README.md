@@ -4,32 +4,20 @@ A simple macOS app for editing ID3 tags on MP3 files.
 
 ## Features
 
-- Drag & drop or browse to open MP3 files
-- Edit common tags: title, artist, album, genre, year, track, disc, BPM
-- Compilation flag support
+- Edit common tags: title, artist, album, genre, year, track, disc, BPM, Compilation flag
 - Save in place or as a copy
-- Restore changes before saving
-
-## Requirements
-
-- macOS 13.0+
-- Python 3
-
-## Building
-
-```bash
-./build-app.sh
-```
-
-The build script creates a self-contained app bundle with its own Python virtual environment and dependencies. The built app will be at `MP3Editor.app` - drag it to your Applications folder.
 
 ## Download
 
-Check the [Releases](../../releases) page for pre-built downloads.
+Grab the latest from the [Releases](../../releases) page. Just unzip and drag to your Applications folder.
+
+## Building from Source
+
+Requires macOS 13.0+ and Python 3. Double-click `build-app.command` to build. The app will be created at `MP3Editor.app`.
 
 ## Technical Details
 
-UI is built with SwiftUI. ID3 tag reading/writing is handled by a Python backend using [mutagen](https://mutagen.readthedocs.io/). Swift communicates with Python via JSON over stdin/stdout pipes. Album art is transferred as base64-encoded data.
+UI built with SwiftUI. ID3 tag reading/writing handled by Python backend using [mutagen](https://mutagen.readthedocs.io/). Swift communicates with Python via JSON over stdin/stdout pipes. Album art transferred as base64-encoded data.
 
 ## License
 
