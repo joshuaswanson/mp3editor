@@ -221,7 +221,7 @@ struct ContentView: View {
                         showOverwriteWarning = true
                     }
                 }
-                .disabled(!hasFile)
+                .disabled(!hasChanges)
             }
         }
         .padding(25)
@@ -475,11 +475,21 @@ struct DropZoneView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 30)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
-                    .foregroundColor(isHighlighted ? .accentColor : .secondary.opacity(0.5))
+                Group {
+                    if fileName.isEmpty {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [8, 4]))
+                            .foregroundColor(isHighlighted ? .accentColor : .secondary.opacity(0.5))
+                    } else {
+                        RoundedRectangle(cornerRadius: 12)
+                            .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 2)
+                    }
+                }
             )
-            .background(isHighlighted ? Color.accentColor.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(fileName.isEmpty ? (isHighlighted ? Color.accentColor.opacity(0.05) : Color.clear) : Color.accentColor.opacity(0.08))
+            )
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
             .onHover { hovering in
