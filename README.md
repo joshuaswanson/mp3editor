@@ -1,6 +1,6 @@
 # MP3Editor
 
-A simple macOS app for editing ID3 tags on MP3 files.
+A little macOS app for editing ID3 tags on MP3 files without needing to use the command line.
 
 ## Features
 
@@ -9,11 +9,11 @@ A simple macOS app for editing ID3 tags on MP3 files.
 
 ## Download
 
-Grab the latest from the [Releases](../../releases) page. Just unzip and drag to your Applications folder.
+See [Releases](../../releases). Unzip and drag to your Applications folder.
 
 ## Building from Source
 
-Requires macOS 13.0+ and Python 3. Double-click `build-app.command` to build. The app will be created at `MP3Editor.app`.
+Requires macOS 13.0+ and Python 3. Double-click `build-app.command` to build the app.
 
 ## Technical Details
 
