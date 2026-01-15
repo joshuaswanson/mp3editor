@@ -18,6 +18,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+enum EditTab: String, CaseIterable {
+    case metadata = "Metadata"
+    case audio = "Audio"
+}
+
 @main
 struct MP3EditorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -50,7 +55,7 @@ struct TagHelper {
     }
 
     static var scriptPath: String {
-        resourcesDir.appendingPathComponent("mp3tags.py").path
+        resourcesDir.appendingPathComponent("mp3processor.py").path
     }
 
     static var pythonPath: String {
@@ -76,8 +81,27 @@ struct TagHelper {
         var artwork_data: String?
         var artwork_mime: String?
         var artwork_delete: Bool?
+        var where_from: String?
         var error: String?
         var success: Bool?
+    }
+
+    struct WaveformData: Codable {
+        var waveform: [Float]?
+        var duration: Double?
+        var error: String?
+    }
+
+    struct ProcessData: Codable {
+        var trim_start: Double?
+        var trim_end: Double?
+        var pitch_shift: Int?
+        var speed: Double?
+    }
+
+    struct ProcessResult: Codable {
+        var success: Bool?
+        var error: String?
     }
 
     static func readTags(from path: String) -> TagData {
@@ -129,11 +153,60 @@ struct TagHelper {
             return TagData(error: error.localizedDescription)
         }
     }
+
+    static func getWaveform(from path: String) -> WaveformData {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = [scriptPath, "waveform", path, "200"]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return try JSONDecoder().decode(WaveformData.self, from: data)
+        } catch {
+            return WaveformData(error: error.localizedDescription)
+        }
+    }
+
+    static func processAudio(source: String, dest: String, data: ProcessData) -> ProcessResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: pythonPath)
+        process.arguments = [scriptPath, "process", source, dest]
+
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        do {
+            try process.run()
+
+            let jsonData = try JSONEncoder().encode(data)
+            inputPipe.fileHandleForWriting.write(jsonData)
+            inputPipe.fileHandleForWriting.closeFile()
+
+            let resultData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+
+            return try JSONDecoder().decode(ProcessResult.self, from: resultData)
+        } catch {
+            return ProcessResult(error: error.localizedDescription)
+        }
+    }
 }
 
 struct ContentView: View {
     @State private var filePath: String? = nil
     @State private var fileName: String = ""
+    @State private var selectedTab: EditTab = .metadata
+
+    // Metadata fields
     @State private var title: String = ""
     @State private var artist: String = ""
     @State private var album: String = ""
@@ -146,6 +219,18 @@ struct ContentView: View {
     @State private var artworkData: Data? = nil
     @State private var artworkMime: String? = nil
     @State private var artworkDeleted: Bool = false
+    @State private var whereFrom: String? = nil
+
+    // Audio editing state
+    @State private var waveformSamples: [Float] = []
+    @State private var audioDuration: Double = 0
+    @State private var trimStart: Double = 0.0
+    @State private var trimEnd: Double = 1.0
+    @State private var pitchShift: Int = 0
+    @State private var speedMultiplier: Double = 1.0
+    @State private var isLoadingWaveform: Bool = false
+
+    // UI state
     @State private var isDragging = false
     @State private var showAlert = false
     @State private var alertMessage = ""
@@ -164,16 +249,29 @@ struct ContentView: View {
     @State private var originalBpm: String = ""
     @State private var originalIsCompilation: Bool = false
     @State private var originalArtworkData: Data? = nil
+    @State private var originalWhereFrom: String? = nil
 
     var hasFile: Bool {
         filePath != nil
     }
 
-    var hasChanges: Bool {
+    var hasMetadataChanges: Bool {
         title != originalTitle || artist != originalArtist || album != originalAlbum ||
         genre != originalGenre || year != originalYear || track != originalTrack ||
         disc != originalDisc || bpm != originalBpm || isCompilation != originalIsCompilation ||
-        artworkData != originalArtworkData || artworkDeleted
+        artworkData != originalArtworkData || artworkDeleted || whereFrom != originalWhereFrom
+    }
+
+    var hasAudioChanges: Bool {
+        trimStart != 0.0 || trimEnd != 1.0 || pitchShift != 0 || speedMultiplier != 1.0
+    }
+
+    var hasChanges: Bool {
+        if selectedTab == .metadata {
+            return hasMetadataChanges
+        } else {
+            return hasAudioChanges
+        }
     }
 
     var body: some View {
@@ -186,22 +284,45 @@ struct ContentView: View {
                 onClear: clearFile
             )
 
-            // Fields
-            FieldsCard(
-                title: $title,
-                artist: $artist,
-                album: $album,
-                genre: $genre,
-                year: $year,
-                track: $track,
-                disc: $disc,
-                bpm: $bpm,
-                isCompilation: $isCompilation,
-                artworkData: $artworkData,
-                artworkMime: $artworkMime,
-                artworkDeleted: $artworkDeleted,
-                isEnabled: hasFile
-            )
+            // Tab picker
+            Picker("", selection: $selectedTab) {
+                ForEach(EditTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            // Content based on selected tab
+            if selectedTab == .metadata {
+                FieldsCard(
+                    title: $title,
+                    artist: $artist,
+                    album: $album,
+                    genre: $genre,
+                    year: $year,
+                    track: $track,
+                    disc: $disc,
+                    bpm: $bpm,
+                    isCompilation: $isCompilation,
+                    artworkData: $artworkData,
+                    artworkMime: $artworkMime,
+                    artworkDeleted: $artworkDeleted,
+                    whereFrom: $whereFrom,
+                    isEnabled: hasFile
+                )
+            } else {
+                AudioEditCard(
+                    waveformSamples: waveformSamples,
+                    duration: audioDuration,
+                    trimStart: $trimStart,
+                    trimEnd: $trimEnd,
+                    pitchShift: $pitchShift,
+                    speedMultiplier: $speedMultiplier,
+                    isLoading: isLoadingWaveform,
+                    isEnabled: hasFile
+                )
+            }
 
             // Bottom bar
             HStack {
@@ -234,7 +355,8 @@ struct ContentView: View {
             }
         }
         .padding(25)
-        .frame(width: 520, height: 680)
+        .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
         .contentShape(Rectangle())
         .onTapGesture {
             NSApp.keyWindow?.makeFirstResponder(nil)
@@ -257,13 +379,13 @@ struct ContentView: View {
         } message: {
             Text("This will modify the original file. This action cannot be undone.")
         }
-        .alert("Disable Save as Copy?", isPresented: $showUncheckedWarning) {
+        .alert("Allow overwriting original files?", isPresented: $showUncheckedWarning) {
             Button("Cancel", role: .cancel) { }
-            Button("Disable", role: .destructive) {
+            Button("Allow", role: .destructive) {
                 saveAsCopy = false
             }
         } message: {
-            Text("With this option disabled, saving will overwrite the original file.")
+            Text("Unchecking this means Save will modify your original file instead of creating a copy.")
         }
     }
 
@@ -292,6 +414,7 @@ struct ContentView: View {
         artworkData = nil
         artworkMime = nil
         artworkDeleted = false
+        whereFrom = nil
         originalTitle = ""
         originalArtist = ""
         originalAlbum = ""
@@ -302,6 +425,14 @@ struct ContentView: View {
         originalBpm = ""
         originalIsCompilation = false
         originalArtworkData = nil
+        originalWhereFrom = nil
+        // Reset audio state
+        waveformSamples = []
+        audioDuration = 0
+        trimStart = 0.0
+        trimEnd = 1.0
+        pitchShift = 0
+        speedMultiplier = 1.0
     }
 
     func handleDrop(providers: [NSItemProvider]) -> Bool {
@@ -358,6 +489,7 @@ struct ContentView: View {
                 artworkMime = nil
             }
             artworkDeleted = false
+            whereFrom = tagData.where_from
         }
 
         // Store original values for restore
@@ -371,24 +503,60 @@ struct ContentView: View {
         originalBpm = bpm
         originalIsCompilation = isCompilation
         originalArtworkData = artworkData
+        originalWhereFrom = whereFrom
+
+        // Reset audio editing state
+        trimStart = 0.0
+        trimEnd = 1.0
+        pitchShift = 0
+        speedMultiplier = 1.0
 
         filePath = url.path
         fileName = url.lastPathComponent
+
+        // Load waveform in background
+        loadWaveform(from: url.path)
+    }
+
+    func loadWaveform(from path: String) {
+        isLoadingWaveform = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let waveformData = TagHelper.getWaveform(from: path)
+            DispatchQueue.main.async {
+                self.isLoadingWaveform = false
+                if let samples = waveformData.waveform {
+                    self.waveformSamples = samples
+                    self.audioDuration = waveformData.duration ?? 0
+                } else {
+                    self.waveformSamples = []
+                    self.audioDuration = 0
+                }
+            }
+        }
     }
 
     func restoreOriginal() {
-        title = originalTitle
-        artist = originalArtist
-        album = originalAlbum
-        genre = originalGenre
-        year = originalYear
-        track = originalTrack
-        disc = originalDisc
-        bpm = originalBpm
-        isCompilation = originalIsCompilation
-        artworkData = originalArtworkData
-        artworkMime = originalArtworkData != nil ? artworkMime : nil
-        artworkDeleted = false
+        if selectedTab == .metadata {
+            title = originalTitle
+            artist = originalArtist
+            album = originalAlbum
+            genre = originalGenre
+            year = originalYear
+            track = originalTrack
+            disc = originalDisc
+            bpm = originalBpm
+            isCompilation = originalIsCompilation
+            artworkData = originalArtworkData
+            artworkMime = originalArtworkData != nil ? artworkMime : nil
+            artworkDeleted = false
+            whereFrom = originalWhereFrom
+        } else {
+            // Reset audio editing values
+            trimStart = 0.0
+            trimEnd = 1.0
+            pitchShift = 0
+            speedMultiplier = 1.0
+        }
     }
 
     func saveFile() {
@@ -398,6 +566,14 @@ struct ContentView: View {
             return
         }
 
+        if selectedTab == .metadata {
+            saveMetadata(sourcePath: sourcePath)
+        } else {
+            saveAudioEdits(sourcePath: sourcePath)
+        }
+    }
+
+    func saveMetadata(sourcePath: String) {
         var targetPath = sourcePath
 
         if saveAsCopy {
@@ -436,7 +612,8 @@ struct ContentView: View {
             compilation: isCompilation,
             artwork_data: artworkBase64,
             artwork_mime: artworkMime,
-            artwork_delete: artworkDeleted
+            artwork_delete: artworkDeleted,
+            where_from: whereFrom ?? ""
         )
 
         let result = TagHelper.writeTags(to: targetPath, data: tagData)
@@ -459,7 +636,47 @@ struct ContentView: View {
             originalBpm = bpm
             originalIsCompilation = isCompilation
             originalArtworkData = artworkData
+            originalWhereFrom = whereFrom
             artworkDeleted = false
+        }
+    }
+
+    func saveAudioEdits(sourcePath: String) {
+        var targetPath = sourcePath
+
+        if saveAsCopy {
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [UTType.mp3]
+            panel.nameFieldStringValue = fileName
+
+            if panel.runModal() == .OK, let url = panel.url {
+                targetPath = url.path
+            } else {
+                return
+            }
+        }
+
+        let processData = TagHelper.ProcessData(
+            trim_start: trimStart,
+            trim_end: trimEnd,
+            pitch_shift: pitchShift,
+            speed: speedMultiplier
+        )
+
+        let result = TagHelper.processAudio(source: sourcePath, dest: targetPath, data: processData)
+
+        if let error = result.error {
+            alertMessage = "Error: \(error)"
+            showAlert = true
+        } else {
+            alertMessage = "Saved!"
+            showAlert = true
+
+            // Reset audio editing state after successful save
+            trimStart = 0.0
+            trimEnd = 1.0
+            pitchShift = 0
+            speedMultiplier = 1.0
         }
     }
 }
@@ -534,19 +751,46 @@ struct FieldsCard: View {
     @Binding var artworkData: Data?
     @Binding var artworkMime: String?
     @Binding var artworkDeleted: Bool
+    @Binding var whereFrom: String?
     var isEnabled: Bool
 
     private let labelWidth: CGFloat = 55
 
+    private var artworkDimensions: String? {
+        guard let data = artworkData, let nsImage = NSImage(data: data) else { return nil }
+        let width = Int(nsImage.size.width)
+        let height = Int(nsImage.size.height)
+        return "\(width) x \(height)"
+    }
+
     var body: some View {
         GlassCard {
             VStack(spacing: 12) {
-                ArtworkView(
-                    artworkData: $artworkData,
-                    artworkMime: $artworkMime,
-                    artworkDeleted: $artworkDeleted,
-                    isEnabled: isEnabled
-                )
+                HStack(alignment: .center) {
+                    Text("Album art")
+                        .frame(width: labelWidth, alignment: .leading)
+
+                    VStack {
+                        ArtworkView(
+                            artworkData: $artworkData,
+                            artworkMime: $artworkMime,
+                            artworkDeleted: $artworkDeleted,
+                            isEnabled: isEnabled
+                        )
+                    }
+
+                    VStack {
+                        Spacer()
+                        if let dimensions = artworkDimensions {
+                            Text(dimensions)
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(height: 120)
+
+                    Spacer()
+                }
 
                 FieldRow(label: "Title", text: $title, placeholder: "Song title", labelWidth: labelWidth, isEnabled: isEnabled)
                 FieldRow(label: "Artist", text: $artist, placeholder: "Artist name", labelWidth: labelWidth, isEnabled: isEnabled)
@@ -567,6 +811,19 @@ struct FieldsCard: View {
                     Toggle("Compilation", isOn: $isCompilation)
                         .disabled(!isEnabled)
                     Spacer()
+                }
+
+                Divider()
+                    .padding(.top, 4)
+
+                HStack {
+                    Text("Source")
+                        .frame(width: labelWidth, alignment: .leading)
+                    TextField("Download URL", text: Binding(
+                        get: { whereFrom ?? "" },
+                        set: { whereFrom = $0.isEmpty ? nil : $0 }
+                    ))
+                    .disabled(!isEnabled)
                 }
             }
             .padding(.vertical, 3)
@@ -733,5 +990,255 @@ struct ArtworkView: View {
             }
         }
         return true
+    }
+}
+
+struct AudioEditCard: View {
+    let waveformSamples: [Float]
+    let duration: Double
+    @Binding var trimStart: Double
+    @Binding var trimEnd: Double
+    @Binding var pitchShift: Int
+    @Binding var speedMultiplier: Double
+    var isLoading: Bool
+    var isEnabled: Bool
+
+    var body: some View {
+        GlassCard {
+            VStack(spacing: 16) {
+                // Waveform with trim handles
+                WaveformView(
+                    samples: waveformSamples,
+                    duration: duration,
+                    trimStart: $trimStart,
+                    trimEnd: $trimEnd,
+                    isLoading: isLoading,
+                    isEnabled: isEnabled
+                )
+                .frame(height: 85)
+
+                Divider()
+
+                // Pitch control
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Pitch")
+                            .frame(width: 50, alignment: .leading)
+                        Text(pitchShift == 0 ? "0" : (pitchShift > 0 ? "+\(pitchShift)" : "\(pitchShift)"))
+                            .frame(width: 35)
+                            .foregroundColor(.secondary)
+                        Text("semitones")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    Slider(value: Binding(
+                        get: { Double(pitchShift) },
+                        set: { pitchShift = Int($0.rounded()) }
+                    ), in: -12...12, step: 1)
+                    .disabled(!isEnabled)
+                }
+
+                // Speed control
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Speed")
+                            .frame(width: 50, alignment: .leading)
+                        Text(String(format: "%.2fx", speedMultiplier))
+                            .frame(width: 50)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    Slider(value: $speedMultiplier, in: 0.5...2.0, step: 0.05)
+                        .disabled(!isEnabled)
+                }
+            }
+            .padding(.vertical, 3)
+        }
+    }
+}
+
+struct WaveformView: View {
+    let samples: [Float]
+    let duration: Double
+    @Binding var trimStart: Double
+    @Binding var trimEnd: Double
+    var isLoading: Bool
+    var isEnabled: Bool
+
+    @State private var activeHandle: DragHandle? = nil
+
+    enum DragHandle {
+        case start, end
+    }
+
+    private func formatTime(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        return String(format: "%d:%02d", mins, secs)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = geometry.size.height
+
+            ZStack(alignment: .leading) {
+                // Background
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.1))
+
+                if isLoading {
+                    // Loading indicator
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Loading waveform...")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                } else if samples.isEmpty {
+                    // No waveform
+                    HStack {
+                        Spacer()
+                        Text("No audio data")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                } else {
+                    // Waveform bars using Canvas for precise positioning
+                    Canvas { context, size in
+                        let barCount = CGFloat(samples.count)
+                        let barSpacing: CGFloat = 1
+                        let totalSpacing = barSpacing * (barCount - 1)
+                        let barWidth = (size.width - totalSpacing) / barCount
+                        let maxBarHeight = size.height
+
+                        for (index, sample) in samples.enumerated() {
+                            let scaledSample = pow(CGFloat(sample), 0.6)
+                            let minHeight: CGFloat = 4
+                            let barHeight = minHeight + scaledSample * (maxBarHeight - minHeight)
+
+                            let x = CGFloat(index) * (barWidth + barSpacing)
+                            let y = (size.height - barHeight) / 2
+
+                            let position = Double(index) / Double(samples.count)
+                            let isInTrimRange = position >= trimStart && position <= trimEnd
+
+                            let rect = CGRect(x: x, y: y, width: barWidth, height: barHeight)
+                            let path = RoundedRectangle(cornerRadius: 1).path(in: rect)
+                            context.fill(path, with: .color(isInTrimRange ? .accentColor : .secondary.opacity(0.3)))
+                        }
+                    }
+                    .frame(width: width, height: height - 18)
+                    .position(x: width / 2, y: (height - 18) / 2)
+
+                    // Trim overlay - left (before start)
+                    Rectangle()
+                        .fill(Color.black.opacity(0.3))
+                        .frame(width: width * CGFloat(trimStart))
+
+                    // Trim overlay - right (after end)
+                    Rectangle()
+                        .fill(Color.black.opacity(0.3))
+                        .frame(width: width * CGFloat(1.0 - trimEnd))
+                        .offset(x: width * CGFloat(trimEnd))
+
+                    // Start handle
+                    TrimHandle(position: trimStart, width: width, height: height, isStart: true, waveformHeight: height - 18)
+
+                    // End handle
+                    TrimHandle(position: trimEnd, width: width, height: height, isStart: false, waveformHeight: height - 18)
+
+                    // Time labels
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Text(formatTime(duration * trimStart))
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(formatTime(duration * trimEnd))
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal, 4)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard isEnabled && !samples.isEmpty else { return }
+                        let position = max(0, min(1.0, value.location.x / width))
+
+                        // On first touch, determine which handle to move based on proximity
+                        if activeHandle == nil {
+                            let distToStart = abs(position - trimStart)
+                            let distToEnd = abs(position - trimEnd)
+                            activeHandle = distToStart <= distToEnd ? .start : .end
+                        }
+
+                        // Move the active handle with animation
+                        withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.8)) {
+                            if activeHandle == .start {
+                                trimStart = max(0, min(trimEnd - 0.02, position))
+                            } else {
+                                trimEnd = max(trimStart + 0.02, min(1.0, position))
+                            }
+                        }
+                    }
+                    .onEnded { _ in
+                        activeHandle = nil
+                    }
+            )
+        }
+    }
+}
+
+struct TrimHandle: View {
+    let position: Double
+    let width: CGFloat
+    let height: CGFloat
+    let isStart: Bool
+    let waveformHeight: CGFloat
+
+    private let handleWidth: CGFloat = 4
+    private let gripSize: CGFloat = 14
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Grip above waveform for start handle
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: gripSize, height: gripSize)
+                .overlay(
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 6, height: 6)
+                )
+                .opacity(isStart ? 1 : 0)
+
+            // Handle bar - full waveform height
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.accentColor)
+                .frame(width: handleWidth, height: waveformHeight)
+
+            // Grip below waveform for end handle
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: gripSize, height: gripSize)
+                .overlay(
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 6, height: 6)
+                )
+                .opacity(isStart ? 0 : 1)
+        }
+        .position(x: width * CGFloat(position), y: waveformHeight / 2)
     }
 }
