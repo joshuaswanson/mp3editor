@@ -23,7 +23,7 @@ echo "Copying Info.plist..."
 cp Info.plist "${APP_BUNDLE}/Contents/"
 
 echo "Copying Python script..."
-cp mp3tags.py "${APP_BUNDLE}/Contents/Resources/"
+cp mp3processor.py "${APP_BUNDLE}/Contents/Resources/"
 
 echo "Creating Python virtual environment..."
 if command -v uv &> /dev/null; then
