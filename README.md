@@ -1,6 +1,6 @@
 # MP3Editor
 
-A little macOS app for editing ID3 tags on MP3 files without needing to use the command line.
+A little macOS app for editing MP3 metadata and audio without the command line or a full DAW.
 
 ## Features
 
