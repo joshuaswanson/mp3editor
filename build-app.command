@@ -49,9 +49,6 @@ echo "Venv Python: ${VENV_DIR}/bin/python"
 echo "Creating PkgInfo..."
 echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
 
-echo "Removing quarantine attribute..."
-xattr -cr "${APP_BUNDLE}"
-
 echo ""
 echo "Build complete! App bundle created at: ${APP_BUNDLE}"
 echo ""
