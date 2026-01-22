@@ -169,13 +169,16 @@ struct TagHelper {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
+        var data = Data()
         do {
             try process.run()
-            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             return try JSONDecoder().decode(WaveformData.self, from: data)
         } catch {
-            return WaveformData(error: error.localizedDescription)
+            let rawOutput = String(data: data, encoding: .utf8) ?? "(no output)"
+            let preview = String(rawOutput.prefix(500))
+            return WaveformData(error: "\(error.localizedDescription)\n\nFirst 500 chars: \(preview)")
         }
     }
 
