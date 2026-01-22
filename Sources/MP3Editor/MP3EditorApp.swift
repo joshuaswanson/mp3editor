@@ -109,20 +109,24 @@ struct TagHelper {
         process.executableURL = URL(fileURLWithPath: pythonPath)
         process.arguments = [scriptPath, "read", path]
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
+        var data = Data()
         do {
             try process.run()
 
             // Read data BEFORE waitUntilExit to avoid pipe buffer deadlock
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
 
             return try JSONDecoder().decode(TagData.self, from: data)
         } catch {
-            return TagData(error: error.localizedDescription)
+            let rawOutput = String(data: data, encoding: .utf8) ?? "(no output)"
+            let preview = String(rawOutput.prefix(500))
+            return TagData(error: "\(error.localizedDescription)\n\nFirst 500 chars: \(preview)")
         }
     }
 
@@ -132,10 +136,11 @@ struct TagHelper {
         process.arguments = [scriptPath, "write", path]
 
         let inputPipe = Pipe()
-        let outputPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
         process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
         do {
             try process.run()
@@ -145,7 +150,7 @@ struct TagHelper {
             inputPipe.fileHandleForWriting.closeFile()
 
             // Read data BEFORE waitUntilExit to avoid pipe buffer deadlock
-            let resultData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let resultData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
 
             return try JSONDecoder().decode(TagData.self, from: resultData)
@@ -159,13 +164,14 @@ struct TagHelper {
         process.executableURL = URL(fileURLWithPath: pythonPath)
         process.arguments = [scriptPath, "waveform", path, "200"]
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
         do {
             try process.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             return try JSONDecoder().decode(WaveformData.self, from: data)
         } catch {
@@ -179,10 +185,11 @@ struct TagHelper {
         process.arguments = [scriptPath, "process", source, dest]
 
         let inputPipe = Pipe()
-        let outputPipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
         process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = outputPipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
         do {
             try process.run()
@@ -191,7 +198,7 @@ struct TagHelper {
             inputPipe.fileHandleForWriting.write(jsonData)
             inputPipe.fileHandleForWriting.closeFile()
 
-            let resultData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let resultData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
 
             return try JSONDecoder().decode(ProcessResult.self, from: resultData)
@@ -846,7 +853,7 @@ struct FieldRow: View {
 
             TextField(placeholder, text: $text)
                 .disabled(!isEnabled)
-                .onChange(of: text) { newValue in
+                .onChange(of: text) { oldValue, newValue in
                     if numericOnly {
                         let filtered = newValue.filter { $0.isNumber }
                         if filtered != newValue {
