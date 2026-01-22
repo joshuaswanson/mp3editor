@@ -46,6 +46,9 @@ else
 fi
 echo "Venv Python: ${VENV_DIR}/bin/python"
 
+echo "Pre-downloading ffmpeg binaries..."
+"${VENV_DIR}/bin/python" -c "import static_ffmpeg; static_ffmpeg.add_paths()"
+
 echo "Creating PkgInfo..."
 echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
 
