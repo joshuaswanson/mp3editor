@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build script for MP3Editor macOS app bundle
+# Build script for MP3 Editor macOS app bundle
 set -e
 
 # Change to the directory where this script is located
@@ -12,12 +12,12 @@ if [[ -f "$HOME/.zprofile" ]]; then
     source "$HOME/.zprofile" 2>/dev/null || true
 fi
 
-APP_NAME="MP3Editor"
+EXECUTABLE_NAME="MP3Editor"
 BUILD_DIR=".build/release"
 APP_BUNDLE="MP3 Editor.app"
 VENV_DIR="${APP_BUNDLE}/Contents/Resources/venv"
 
-echo "Building ${APP_NAME} in release mode..."
+echo "Building MP3 Editor in release mode..."
 swift build -c release
 
 echo "Creating app bundle structure..."
@@ -26,7 +26,7 @@ mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
 echo "Copying executable..."
-cp "${BUILD_DIR}/${APP_NAME}" "${APP_BUNDLE}/Contents/MacOS/"
+cp "${BUILD_DIR}/${EXECUTABLE_NAME}" "${APP_BUNDLE}/Contents/MacOS/"
 
 echo "Copying Info.plist..."
 cp Info.plist "${APP_BUNDLE}/Contents/"
