@@ -1031,7 +1031,6 @@ struct AudioEditCard: View {
                     isLoading: isLoading,
                     isEnabled: isEnabled
                 )
-                .frame(height: 70)
 
                 Divider()
 
@@ -1096,23 +1095,26 @@ struct WaveformView: View {
 
     private let waveformCornerRadius: CGFloat = 14  // Must match handleWidth for corners to align
 
+    private let waveformAreaHeight: CGFloat = 46
+    private let handleWidth: CGFloat = 14
+
     var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            let height = geometry.size.height
-            let waveformHeight = height - 18
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Trim")
+                .padding(.bottom, 6)
 
-            let handleWidth: CGFloat = 14
-            let innerHeight = waveformHeight
+            // Waveform area with GeometryReader (needs width for positioning)
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                let height = geometry.size.height
 
-            VStack(spacing: 4) {
                 ZStack(alignment: .leading) {
                     // Background - only spans content area between handles
                     let contentWidth = width - handleWidth * 2
                     RoundedRectangle(cornerRadius: waveformCornerRadius)
                         .fill(Color.secondary.opacity(0.15))
-                        .frame(width: contentWidth, height: innerHeight)
-                        .position(x: handleWidth + contentWidth / 2, y: waveformHeight / 2)
+                        .frame(width: contentWidth, height: height)
+                        .position(x: handleWidth + contentWidth / 2, y: height / 2)
 
                     if isLoading {
                         // Loading indicator
@@ -1169,8 +1171,8 @@ struct WaveformView: View {
                         if leftOverlayWidth > 0 {
                             UnevenRoundedRectangle(topLeadingRadius: waveformCornerRadius, bottomLeadingRadius: waveformCornerRadius, bottomTrailingRadius: 0, topTrailingRadius: 0)
                                 .fill(Color.black.opacity(0.35))
-                                .frame(width: leftOverlayWidth, height: innerHeight)
-                                .position(x: handleWidth + leftOverlayWidth / 2, y: waveformHeight / 2)
+                                .frame(width: leftOverlayWidth, height: height)
+                                .position(x: handleWidth + leftOverlayWidth / 2, y: height / 2)
                         }
 
                         // Trim overlay - right (after end) - sits inside the handle area
@@ -1178,8 +1180,8 @@ struct WaveformView: View {
                         if rightOverlayWidth > 0 {
                             UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 0, bottomTrailingRadius: waveformCornerRadius, topTrailingRadius: waveformCornerRadius)
                                 .fill(Color.black.opacity(0.35))
-                                .frame(width: rightOverlayWidth, height: innerHeight)
-                                .position(x: width - handleWidth - rightOverlayWidth / 2, y: waveformHeight / 2)
+                                .frame(width: rightOverlayWidth, height: height)
+                                .position(x: width - handleWidth - rightOverlayWidth / 2, y: height / 2)
                         }
 
                         // Selection frame
@@ -1187,57 +1189,57 @@ struct WaveformView: View {
                             trimStart: trimStart,
                             trimEnd: trimEnd,
                             width: width,
-                            waveformHeight: waveformHeight,
+                            waveformHeight: height,
                             handleWidth: handleWidth
                         )
                     }
                 }
-                .frame(height: waveformHeight)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            guard isEnabled && !samples.isEmpty else { return }
+                            // Account for horizontal padding when calculating position
+                            let contentWidth = width - (handleWidth * 2)
+                            let adjustedX = value.location.x - handleWidth
+                            let position = max(0, min(1.0, adjustedX / contentWidth))
 
-                // Time labels outside the waveform box
-                if !samples.isEmpty {
-                    HStack {
-                        Text(formatTime(duration * trimStart))
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text(formatTime(duration * trimEnd))
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 4)
-                }
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        guard isEnabled && !samples.isEmpty else { return }
-                        // Account for horizontal padding when calculating position
-                        let contentWidth = width - (handleWidth * 2)
-                        let adjustedX = value.location.x - handleWidth
-                        let position = max(0, min(1.0, adjustedX / contentWidth))
+                            // On first touch, determine which handle to move based on proximity
+                            if activeHandle == nil {
+                                let distToStart = abs(position - trimStart)
+                                let distToEnd = abs(position - trimEnd)
+                                activeHandle = distToStart <= distToEnd ? .start : .end
+                            }
 
-                        // On first touch, determine which handle to move based on proximity
-                        if activeHandle == nil {
-                            let distToStart = abs(position - trimStart)
-                            let distToEnd = abs(position - trimEnd)
-                            activeHandle = distToStart <= distToEnd ? .start : .end
-                        }
-
-                        // Move the active handle with animation
-                        withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.8)) {
-                            if activeHandle == .start {
-                                trimStart = max(0, min(trimEnd - 0.02, position))
-                            } else {
-                                trimEnd = max(trimStart + 0.02, min(1.0, position))
+                            // Move the active handle with animation
+                            withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.8)) {
+                                if activeHandle == .start {
+                                    trimStart = max(0, min(trimEnd - 0.02, position))
+                                } else {
+                                    trimEnd = max(trimStart + 0.02, min(1.0, position))
+                                }
                             }
                         }
-                    }
-                    .onEnded { _ in
-                        activeHandle = nil
-                    }
-            )
+                        .onEnded { _ in
+                            activeHandle = nil
+                        }
+                )
+            }
+            .frame(height: waveformAreaHeight)
+
+            // Time labels outside the waveform box (self-sizing)
+            if !samples.isEmpty {
+                HStack {
+                    Text(formatTime(duration * trimStart))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(formatTime(duration * trimEnd))
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 4)
+            }
         }
     }
 }
