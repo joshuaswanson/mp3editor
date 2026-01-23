@@ -12,7 +12,7 @@ A little macOS app for editing MP3 metadata and audio without the command line o
 
 ## Building from Source
 
-Requires macOS 13.0+ and Python 3. Double-click `build-app.command` to build a self-contained app bundle.
+Requires macOS 13.0+ and Python 3. Double-click `build` or run `./build` to build a self-contained app bundle.
 
 ## Technical Details
 
