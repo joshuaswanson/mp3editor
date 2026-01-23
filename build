@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Build script for MP3 Editor macOS app bundle
+set -e
+
+# Change to the directory where this script is located
+cd "$(dirname "$0")"
+
+# Load shell profile to get proper PATH (needed when launched from Finder)
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+if [[ -f "$HOME/.zprofile" ]]; then
+    source "$HOME/.zprofile" 2>/dev/null || true
+fi
+
+EXECUTABLE_NAME="MP3Editor"
+BUILD_DIR=".build/release"
+APP_BUNDLE="MP3 Editor.app"
+VENV_DIR="${APP_BUNDLE}/Contents/Resources/venv"
+
+# Progress bar settings
+TOTAL_STEPS=7
+CURRENT_STEP=0
+BAR_WIDTH=30
+
+show_progress() {
+    local status="$1"
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+    local percent=$((CURRENT_STEP * 100 / TOTAL_STEPS))
+    local filled=$((CURRENT_STEP * BAR_WIDTH / TOTAL_STEPS))
+    local empty=$((BAR_WIDTH - filled))
+    local bar=$(printf "%${filled}s" | tr ' ' '#')$(printf "%${empty}s" | tr ' ' '-')
+    printf "\r\033[K[%s] %3d%%  %s" "$bar" "$percent" "$status"
+}
+
+# Show completed state
+finish() {
+    printf "\r\033[K[##############################] 100%%  Done\n"
+}
+
+trap finish EXIT
+
+show_progress "Compiling Swift..."
+swift build -c release >/dev/null 2>&1
+
+show_progress "Creating app bundle..."
+rm -rf "${APP_BUNDLE}"
+mkdir -p "${APP_BUNDLE}/Contents/MacOS"
+mkdir -p "${APP_BUNDLE}/Contents/Resources"
+
+show_progress "Copying files..."
+cp "${BUILD_DIR}/${EXECUTABLE_NAME}" "${APP_BUNDLE}/Contents/MacOS/"
+cp Info.plist "${APP_BUNDLE}/Contents/"
+cp mp3processor.py "${APP_BUNDLE}/Contents/Resources/"
+
+show_progress "Creating Python venv..."
+if command -v uv &> /dev/null; then
+    uv venv "${VENV_DIR}" >/dev/null 2>&1
+else
+    python3 -m venv "${VENV_DIR}" >/dev/null 2>&1
+fi
+
+show_progress "Installing dependencies..."
+if command -v uv &> /dev/null; then
+    uv pip install --python "${VENV_DIR}/bin/python" -r requirements.txt >/dev/null 2>&1
+else
+    "${VENV_DIR}/bin/pip" install -r requirements.txt >/dev/null 2>&1
+fi
+
+show_progress "Downloading ffmpeg..."
+"${VENV_DIR}/bin/python" -c "import static_ffmpeg; static_ffmpeg.add_paths()" >/dev/null 2>&1
+
+show_progress "Finalizing..."
+echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
